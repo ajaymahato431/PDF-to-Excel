@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import logging
 import math
+import os
 import shutil
 import sys
 from collections import OrderedDict
@@ -171,6 +172,15 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument("pdf_path", type=Path, help="Path to the input PDF file.")
     parser.add_argument(
+        "--mode",
+        choices=("prompt", "auto", "pdfplumber", "ocr"),
+        default="prompt",
+        help=(
+            "Extraction mode to use. 'prompt' asks at runtime, 'auto' falls back to OCR only when "
+            "needed, 'pdfplumber' disables OCR, and 'ocr' runs Tesseract directly."
+        ),
+    )
+    parser.add_argument(
         "-o",
         "--output",
         type=Path,
@@ -206,10 +216,26 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Minimum x-gap to consider when inferring column breaks automatically.",
     )
     parser.add_argument(
+        "--poppler-path",
+        type=Path,
+        default=Path(r"C:\poppler-25.07.0\Library\bin"),
+        help=(
+            "Directory containing Poppler binaries for pdf2image (default: C:\\poppler-25.07.0\\Library\\bin)."
+        ),
+    )
+    parser.add_argument(
         "--tesseract-cmd",
         type=Path,
         default=Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),
         help="Override tesseract binary location. Default points to common Windows installation path.",
+    )
+    parser.add_argument(
+        "--tessdata-dir",
+        type=Path,
+        default=Path(r"C:\Program Files\Tesseract-OCR\tessdata"),
+        help=(
+            "Directory containing Tesseract language data (default: C:\\Program Files\\Tesseract-OCR\\tessdata)."
+        ),
     )
     parser.add_argument(
         "--ocr-lang",
@@ -285,21 +311,39 @@ def configure_logging(verbose: bool) -> None:
     )
 
 
-def configure_tesseract(binary: Path) -> None:
+def configure_tesseract(binary: Path, tessdata_dir: Optional[Path]) -> Optional[Path]:
+    resolved_binary: Optional[Path]
     if binary.exists():
-        pytesseract.pytesseract.tesseract_cmd = str(binary)
-        LOGGER.debug("Using Tesseract binary at %s", binary)
-        return
-
-    resolved = shutil.which("tesseract")
-    if resolved:
-        LOGGER.debug("Using Tesseract found on PATH at %s", resolved)
-        pytesseract.pytesseract.tesseract_cmd = resolved
+        resolved_binary = binary
     else:
+        resolved = shutil.which("tesseract")
+        resolved_binary = Path(resolved) if resolved else None
+
+    if not resolved_binary:
         raise FileNotFoundError(
             f"Tesseract binary not found. Tried {binary} and PATH. "
             "Install Tesseract or provide --tesseract-cmd."
         )
+
+    pytesseract.pytesseract.tesseract_cmd = str(resolved_binary)
+    LOGGER.debug("Using Tesseract binary at %s", resolved_binary)
+
+    if not tessdata_dir:
+        return None
+
+    candidate = tessdata_dir
+    if candidate.is_file():
+        candidate = candidate.parent
+    if candidate.is_dir() and candidate.name != "tessdata" and (candidate / "tessdata").is_dir():
+        candidate = candidate / "tessdata"
+    if not candidate.exists():
+        LOGGER.warning("Provided tessdata directory %s does not exist; relying on system default.", tessdata_dir)
+        return None
+
+    resolved_candidate = candidate.resolve()
+    os.environ["TESSDATA_PREFIX"] = str(resolved_candidate)
+    LOGGER.debug("Configured TESSDATA_PREFIX=%s", os.environ["TESSDATA_PREFIX"])
+    return resolved_candidate
 
 
 def parse_pages(pages_argument: Optional[str], total_pages: int) -> List[int]:
@@ -323,6 +367,36 @@ def parse_pages(pages_argument: Optional[str], total_pages: int) -> List[int]:
     if not unique_sorted:
         raise ValueError("No valid pages computed from --pages argument.")
     return unique_sorted
+
+
+def resolve_extraction_mode(mode: str) -> str:
+    if mode != "prompt":
+        return mode
+    if not sys.stdin.isatty():
+        LOGGER.warning("Prompt mode requested but no interactive stdin is available; defaulting to auto.")
+        return "auto"
+
+    prompt = (
+        "\nChoose an extraction method:\n"
+        "  [1] Direct extraction with pdfplumber\n"
+        "  [2] OCR with Tesseract (recommended for Nepali text)\n"
+        "  [3] Auto (try pdfplumber first, fallback to OCR)\n"
+        "Enter your choice [1-3, default 3]: "
+    )
+
+    while True:
+        try:
+            choice = input(prompt).strip()
+        except EOFError:
+            LOGGER.warning("No input detected; defaulting to auto mode.")
+            return "auto"
+        if choice in ("", "3"):
+            return "auto"
+        if choice == "1":
+            return "pdfplumber"
+        if choice == "2":
+            return "ocr"
+        print("Invalid choice. Please enter 1, 2, or 3.")
 
 
 def extract_tables_with_pdfplumber(
@@ -547,8 +621,13 @@ def words_from_ocr(
     lang: str,
     psm: str,
     min_confidence: int,
+    tessdata_dir: Optional[Path] = None,
 ) -> List[WordBBox]:
-    config = f"--psm {psm}"
+    config_parts = [f"--psm {psm}"]
+    if tessdata_dir:
+        resolved_dir = tessdata_dir.resolve()
+        config_parts.append(f'--tessdata-dir "{resolved_dir.as_posix()}"')
+    config = " ".join(config_parts)
     ocr_result = pytesseract.image_to_data(
         image,
         lang=lang,
@@ -591,19 +670,30 @@ def dataframes_from_ocr(
     lang: str,
     psm: str,
     min_confidence: int,
+    poppler_path: Optional[Path] = None,
+    tessdata_dir: Optional[Path] = None,
 ) -> List[pd.DataFrame]:
     dataframes: List[pd.DataFrame] = []
     for page_idx in pages:
+        poppler_kwargs = {"poppler_path": str(poppler_path)} if poppler_path else {}
         images = convert_from_path(
             pdf_path,
             first_page=page_idx + 1,
             last_page=page_idx + 1,
             dpi=dpi,
+            **poppler_kwargs,
         )
         if not images:
             continue
         processed = preprocess_image_for_ocr(images[0])
-        words = words_from_ocr(processed, lang=lang, psm=psm, min_confidence=min_confidence)
+        tessdata_config = None if os.environ.get("TESSDATA_PREFIX") else tessdata_dir
+        words = words_from_ocr(
+            processed,
+            lang=lang,
+            psm=psm,
+            min_confidence=min_confidence,
+            tessdata_dir=tessdata_config,
+        )
         if not words:
             continue
         rows = group_words_into_rows(words, y_tolerance=y_tolerance)
@@ -631,8 +721,9 @@ def group_tables_by_header(dfs: Sequence[pd.DataFrame]) -> "OrderedDict[str, pd.
     ordered_tables: "OrderedDict[str, pd.DataFrame]" = OrderedDict()
     for idx, (columns, frames) in enumerate(grouped.items(), start=1):
         merged = pd.concat(frames, ignore_index=True)
-        for column in merged.columns:
-            merged[column] = merged[column].astype(str).str.strip()
+        for col_idx in range(len(merged.columns)):
+            series = merged.iloc[:, col_idx]
+            merged.iloc[:, col_idx] = series.astype(str).str.strip()
 
         sheet_name = f"Table{idx:02d}"
         ordered_tables[sheet_name] = merged
@@ -662,7 +753,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         LOGGER.error("PDF not found at %s", args.pdf_path)
         return 1
 
-    configure_tesseract(args.tesseract_cmd)
+    resolved_tessdata = configure_tesseract(args.tesseract_cmd, args.tessdata_dir)
+
+    poppler_path: Optional[Path] = None
+    if args.poppler_path and args.poppler_path.exists():
+        poppler_path = args.poppler_path
+        LOGGER.debug("Using Poppler binaries at %s", poppler_path)
+    elif args.poppler_path:
+        LOGGER.warning(
+            "Poppler path %s not found; pdf2image will rely on PATH/registry resolution.",
+            args.poppler_path,
+        )
+
+    mode = "ocr" if args.force_ocr else resolve_extraction_mode(args.mode)
+    if args.force_ocr and mode != "ocr":
+        LOGGER.info("Overriding prompted mode to 'ocr' because --force-ocr was supplied.")
+        mode = "ocr"
+    args.force_ocr = mode == "ocr"
+    allow_ocr_fallback = mode != "pdfplumber"
+    LOGGER.info("Extraction mode selected: %s", mode)
 
     with pdfplumber.open(args.pdf_path) as pdf:
         selected_pages = parse_pages(args.pages, len(pdf.pages))
@@ -715,7 +824,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             dataframes.extend(dfs)
             LOGGER.info("Reconstructed %s table(s) from pdf words.", len(dfs))
 
-    if not dataframes:
+    if not dataframes and allow_ocr_fallback:
         LOGGER.info("Step 4: OCR fallback via Tesseract (lang=%s)", args.ocr_lang)
         dfs = dataframes_from_ocr(
             args.pdf_path,
@@ -727,6 +836,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             lang=args.ocr_lang,
             psm=args.ocr_psm,
             min_confidence=args.ocr_confidence,
+            poppler_path=poppler_path,
+            tessdata_dir=resolved_tessdata,
         )
         if dfs:
             dataframes.extend(dfs)
@@ -734,6 +845,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else:
             LOGGER.error("OCR fallback failed to recover any tables.")
             return 2
+    elif not dataframes:
+        LOGGER.error("No tables were detected using pdfplumber-only mode.")
+        return 3
 
     tables = group_tables_by_header(dataframes)
     export_to_excel(tables, args.output)
