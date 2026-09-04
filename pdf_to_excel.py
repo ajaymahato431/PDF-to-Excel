@@ -11,6 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 import numpy as np
 import pandas as pd
 import pdfplumber
@@ -166,6 +172,51 @@ def normalize_rows(
     return filtered_rows
 
 
+def _env_bool(key: str, default: bool = False) -> bool:
+    val = os.getenv(key)
+    if val is None:
+        return default
+    return val.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_float(key: str, default: float) -> float:
+    val = os.getenv(key)
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except ValueError:
+        return default
+
+
+def _env_int(key: str, default: int) -> int:
+    val = os.getenv(key)
+    if val is None:
+        return default
+    try:
+        return int(val)
+    except ValueError:
+        return default
+
+
+ENV_POPPLER_PATH = os.getenv("POPPLER_PATH")
+ENV_TESSERACT_CMD = os.getenv("TESSERACT_CMD")
+ENV_TESSDATA_DIR = os.getenv("TESSDATA_PREFIX") or os.getenv("TESSDATA_DIR")
+ENV_OCR_LANG = os.getenv("OCR_LANG", "nep")
+ENV_OCR_PSM = os.getenv("OCR_PSM", "6")
+ENV_OCR_DPI = _env_int("OCR_DPI", 300)
+ENV_OCR_CONFIDENCE = _env_int("OCR_CONFIDENCE", 70)
+ENV_EXTRACTION_MODE = os.getenv("EXTRACTION_MODE", "prompt")
+ENV_DEFAULT_OUTPUT = os.getenv("DEFAULT_OUTPUT", "extracted_table.xlsx")
+ENV_MAX_COLUMNS = _env_int("MAX_COLUMNS", 12)
+ENV_EDGE_CLUSTER_TOLERANCE = _env_float("EDGE_CLUSTER_TOLERANCE", 2.5)
+ENV_EDGE_MIN_VERTICAL = _env_float("EDGE_MIN_VERTICAL", 18.0)
+ENV_EDGE_MIN_HORIZONTAL = _env_float("EDGE_MIN_HORIZONTAL", 30.0)
+ENV_EDGE_COLUMN_MIN_FILL = _env_int("EDGE_COLUMN_MIN_FILL", 1)
+ENV_Y_TOLERANCE = _env_float("Y_TOLERANCE", 4.0)
+ENV_MIN_GAP = _env_float("MIN_GAP", 18.0)
+
+
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Convert tabular Nepali PDFs into Excel with pdfplumber + OCR fallback."
@@ -174,18 +225,18 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--mode",
         choices=("prompt", "auto", "pdfplumber", "ocr"),
-        default="prompt",
+        default=ENV_EXTRACTION_MODE,
         help=(
-            "Extraction mode to use. 'prompt' asks at runtime, 'auto' falls back to OCR only when "
-            "needed, 'pdfplumber' disables OCR, and 'ocr' runs Tesseract directly."
+            f"Extraction mode to use (default: {ENV_EXTRACTION_MODE}). 'prompt' asks at runtime, "
+            "'auto' falls back to OCR only when needed, 'pdfplumber' disables OCR, and 'ocr' runs Tesseract directly."
         ),
     )
     parser.add_argument(
         "-o",
         "--output",
         type=Path,
-        default=Path("extracted_table.xlsx"),
-        help="Output Excel path (default: extracted_table.xlsx)",
+        default=Path(ENV_DEFAULT_OUTPUT),
+        help=f"Output Excel path (default: {ENV_DEFAULT_OUTPUT})",
     )
     parser.add_argument(
         "--pages",
@@ -206,60 +257,60 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--y-tolerance",
         type=float,
-        default=4.0,
-        help="Tolerance in points for grouping words into the same row.",
+        default=ENV_Y_TOLERANCE,
+        help=f"Tolerance in points for grouping words into the same row (default: {ENV_Y_TOLERANCE}).",
     )
     parser.add_argument(
         "--min-gap",
         type=float,
-        default=18.0,
-        help="Minimum x-gap to consider when inferring column breaks automatically.",
+        default=ENV_MIN_GAP,
+        help=f"Minimum x-gap to consider when inferring column breaks automatically (default: {ENV_MIN_GAP}).",
     )
     parser.add_argument(
         "--poppler-path",
         type=Path,
-        default=Path(r"C:\poppler-25.07.0\Library\bin"),
+        default=Path(ENV_POPPLER_PATH) if ENV_POPPLER_PATH else None,
         help=(
-            "Directory containing Poppler binaries for pdf2image (default: C:\\poppler-25.07.0\\Library\\bin)."
+            "Directory containing Poppler binaries for pdf2image (default: auto-detected or env POPPLER_PATH)."
         ),
     )
     parser.add_argument(
         "--tesseract-cmd",
         type=Path,
-        default=Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),
-        help="Override tesseract binary location. Default points to common Windows installation path.",
+        default=Path(ENV_TESSERACT_CMD) if ENV_TESSERACT_CMD else None,
+        help="Override tesseract binary location (default: auto-detected or env TESSERACT_CMD).",
     )
     parser.add_argument(
         "--tessdata-dir",
         type=Path,
-        default=Path(r"C:\Program Files\Tesseract-OCR\tessdata"),
+        default=Path(ENV_TESSDATA_DIR) if ENV_TESSDATA_DIR else None,
         help=(
-            "Directory containing Tesseract language data (default: C:\\Program Files\\Tesseract-OCR\\tessdata)."
+            "Directory containing Tesseract language data (default: auto-detected or env TESSDATA_PREFIX)."
         ),
     )
     parser.add_argument(
         "--ocr-lang",
         type=str,
-        default="nep",
-        help="Language code for Tesseract OCR (default: nep).",
+        default=ENV_OCR_LANG,
+        help=f"Language code for Tesseract OCR (default: {ENV_OCR_LANG}).",
     )
     parser.add_argument(
         "--ocr-psm",
         type=str,
-        default="6",
-        help="Tesseract page segmentation mode (PSM). Default: 6 (uniform block).",
+        default=ENV_OCR_PSM,
+        help=f"Tesseract page segmentation mode (PSM). Default: {ENV_OCR_PSM}.",
     )
     parser.add_argument(
         "--ocr-confidence",
         type=int,
-        default=70,
-        help="Minimum OCR confidence (0-100) for words to be kept.",
+        default=ENV_OCR_CONFIDENCE,
+        help=f"Minimum OCR confidence (0-100) for words to be kept (default: {ENV_OCR_CONFIDENCE}).",
     )
     parser.add_argument(
         "--dpi",
         type=int,
-        default=300,
-        help="Rendering DPI for OCR fallback. Higher DPI improves OCR but costs time.",
+        default=ENV_OCR_DPI,
+        help=f"Rendering DPI for OCR fallback (default: {ENV_OCR_DPI}).",
     )
     parser.add_argument(
         "--force-ocr",
@@ -269,32 +320,32 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--max-columns",
         type=int,
-        default=12,
-        help="Maximum allowed columns before a detected table is discarded as noise (default: 12).",
+        default=ENV_MAX_COLUMNS,
+        help=f"Maximum allowed columns before a detected table is discarded as noise (default: {ENV_MAX_COLUMNS}).",
     )
     parser.add_argument(
         "--edge-cluster-tolerance",
         type=float,
-        default=2.5,
-        help="Tolerance (points) when clustering table edge positions (default: 2.5).",
+        default=ENV_EDGE_CLUSTER_TOLERANCE,
+        help=f"Tolerance (points) when clustering table edge positions (default: {ENV_EDGE_CLUSTER_TOLERANCE}).",
     )
     parser.add_argument(
         "--edge-min-vertical",
         type=float,
-        default=18.0,
-        help="Minimum vertical edge height to consider for column detection (default: 18).",
+        default=ENV_EDGE_MIN_VERTICAL,
+        help=f"Minimum vertical edge height to consider for column detection (default: {ENV_EDGE_MIN_VERTICAL}).",
     )
     parser.add_argument(
         "--edge-min-horizontal",
         type=float,
-        default=30.0,
-        help="Minimum horizontal edge width to consider for row detection (default: 30).",
+        default=ENV_EDGE_MIN_HORIZONTAL,
+        help=f"Minimum horizontal edge width to consider for row detection (default: {ENV_EDGE_MIN_HORIZONTAL}).",
     )
     parser.add_argument(
         "--edge-column-min-fill",
         type=int,
-        default=1,
-        help="Discard edge-derived columns that have <= this many non-empty cells (default: 1).",
+        default=ENV_EDGE_COLUMN_MIN_FILL,
+        help=f"Discard edge-derived columns that have <= this many non-empty cells (default: {ENV_EDGE_COLUMN_MIN_FILL}).",
     )
     parser.add_argument(
         "--verbose",
@@ -311,39 +362,89 @@ def configure_logging(verbose: bool) -> None:
     )
 
 
-def configure_tesseract(binary: Path, tessdata_dir: Optional[Path]) -> Optional[Path]:
-    resolved_binary: Optional[Path]
-    if binary.exists():
+def configure_poppler(poppler_path: Optional[Path] = None) -> Optional[Path]:
+    if poppler_path and poppler_path.exists():
+        LOGGER.debug("Using Poppler binaries at %s", poppler_path)
+        return poppler_path
+    elif poppler_path:
+        LOGGER.warning("Specified Poppler path %s does not exist.", poppler_path)
+
+    if shutil.which("pdftoppm"):
+        return None
+
+    if sys.platform.startswith("win"):
+        candidates = [
+            Path(r"C:\Program Files\poppler\Library\bin"),
+            Path(r"C:\Program Files\poppler\bin"),
+            Path(r"C:\poppler\Library\bin"),
+            Path(r"C:\poppler\bin"),
+            Path(r"C:\poppler-25.07.0\Library\bin"),
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                LOGGER.debug("Auto-detected Poppler binaries at %s", candidate)
+                return candidate
+
+    return None
+
+
+def configure_tesseract(binary: Optional[Path] = None, tessdata_dir: Optional[Path] = None) -> Optional[Path]:
+    resolved_binary: Optional[Path] = None
+    if binary and binary.exists():
         resolved_binary = binary
-    else:
-        resolved = shutil.which("tesseract")
-        resolved_binary = Path(resolved) if resolved else None
+    elif binary:
+        LOGGER.warning("Specified tesseract binary not found at %s", binary)
 
     if not resolved_binary:
-        raise FileNotFoundError(
-            f"Tesseract binary not found. Tried {binary} and PATH. "
-            "Install Tesseract or provide --tesseract-cmd."
+        which_path = shutil.which("tesseract")
+        if which_path:
+            resolved_binary = Path(which_path)
+
+    if not resolved_binary and sys.platform.startswith("win"):
+        candidates = [
+            Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),
+            Path(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"),
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Tesseract-OCR" / "tesseract.exe",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                resolved_binary = candidate
+                break
+
+    if not resolved_binary:
+        LOGGER.warning(
+            "Tesseract binary not found on PATH or standard locations. "
+            "OCR will fail unless Tesseract is installed or --tesseract-cmd is specified."
         )
+        return None
 
     pytesseract.pytesseract.tesseract_cmd = str(resolved_binary)
     LOGGER.debug("Using Tesseract binary at %s", resolved_binary)
 
-    if not tessdata_dir:
-        return None
+    candidate: Optional[Path] = None
+    if tessdata_dir:
+        candidate = tessdata_dir
+    elif os.environ.get("TESSDATA_PREFIX"):
+        candidate = Path(os.environ["TESSDATA_PREFIX"])
+    elif resolved_binary:
+        default_tessdata = resolved_binary.parent / "tessdata"
+        if default_tessdata.exists():
+            candidate = default_tessdata
 
-    candidate = tessdata_dir
-    if candidate.is_file():
-        candidate = candidate.parent
-    if candidate.is_dir() and candidate.name != "tessdata" and (candidate / "tessdata").is_dir():
-        candidate = candidate / "tessdata"
-    if not candidate.exists():
-        LOGGER.warning("Provided tessdata directory %s does not exist; relying on system default.", tessdata_dir)
-        return None
+    if candidate:
+        if candidate.is_file():
+            candidate = candidate.parent
+        if candidate.is_dir() and candidate.name != "tessdata" and (candidate / "tessdata").is_dir():
+            candidate = candidate / "tessdata"
+        if candidate.exists():
+            resolved_candidate = candidate.resolve()
+            os.environ["TESSDATA_PREFIX"] = str(resolved_candidate)
+            LOGGER.debug("Configured TESSDATA_PREFIX=%s", os.environ["TESSDATA_PREFIX"])
+            return resolved_candidate
+        else:
+            LOGGER.warning("Candidate tessdata directory %s does not exist.", candidate)
 
-    resolved_candidate = candidate.resolve()
-    os.environ["TESSDATA_PREFIX"] = str(resolved_candidate)
-    LOGGER.debug("Configured TESSDATA_PREFIX=%s", os.environ["TESSDATA_PREFIX"])
-    return resolved_candidate
+    return None
 
 
 def parse_pages(pages_argument: Optional[str], total_pages: int) -> List[int]:
@@ -753,18 +854,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         LOGGER.error("PDF not found at %s", args.pdf_path)
         return 1
 
-    resolved_tessdata = configure_tesseract(args.tesseract_cmd, args.tessdata_dir)
-
-    poppler_path: Optional[Path] = None
-    if args.poppler_path and args.poppler_path.exists():
-        poppler_path = args.poppler_path
-        LOGGER.debug("Using Poppler binaries at %s", poppler_path)
-    elif args.poppler_path:
-        LOGGER.warning(
-            "Poppler path %s not found; pdf2image will rely on PATH/registry resolution.",
-            args.poppler_path,
-        )
-
     mode = "ocr" if args.force_ocr else resolve_extraction_mode(args.mode)
     if args.force_ocr and mode != "ocr":
         LOGGER.info("Overriding prompted mode to 'ocr' because --force-ocr was supplied.")
@@ -772,6 +861,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args.force_ocr = mode == "ocr"
     allow_ocr_fallback = mode != "pdfplumber"
     LOGGER.info("Extraction mode selected: %s", mode)
+
+    resolved_tessdata: Optional[Path] = None
+    poppler_path: Optional[Path] = None
+    if allow_ocr_fallback:
+        resolved_tessdata = configure_tesseract(args.tesseract_cmd, args.tessdata_dir)
+        poppler_path = configure_poppler(args.poppler_path)
 
     with pdfplumber.open(args.pdf_path) as pdf:
         selected_pages = parse_pages(args.pages, len(pdf.pages))
