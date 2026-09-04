@@ -233,4 +233,4 @@ python pdf_to_excel.py "input.pdf" -o "output.xlsx"
 
 ## 📄 License
 
-This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details..
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
