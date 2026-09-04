@@ -2,7 +2,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![OCR: Tesseract](https://img.shields.io/badge/OCR-Tesseract%20(nep)-green.svg)](https://github.com/tesseract-ocr/tesseract)
+[![OCR: Tesseract](<https://img.shields.io/badge/OCR-Tesseract%20(nep)-green.svg>)](https://github.com/tesseract-ocr/tesseract)
 [![Docker Ready](https://img.shields.io/badge/docker-ready-blue.svg)](Dockerfile)
 [![Platform: Linux | macOS | Windows](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)]()
 
@@ -18,19 +18,19 @@ Extracting tables from PDFs often fails when documents are scanned, lack clear c
 flowchart TD
     A[Input PDF Document] --> B[Parse Page Selection]
     B --> C{Mode Selection}
-    
+
     C -->|pdfplumber / auto| D[Tier 1: Native pdfplumber Extraction]
     D -->|Table Found?| Z[Export Multi-Sheet Excel]
-    
+
     D -->|No Table| E[Tier 2: Vector Edge Reconstruction]
     E -->|Intersect lines & text coords| Z
-    
+
     E -->|No Table| F[Tier 3: Word Clustering & Coordinate Analysis]
     F -->|Inferred column breaks & spacing| Z
-    
+
     C -->|ocr / fallback| G[Tier 4: OCR Engine Fallback]
     F -->|No Table & OCR allowed| G
-    
+
     G --> H[Convert PDF to Image via Poppler]
     H --> I[OpenCV Preprocessing: Otsu Thresholding & Denoising]
     I --> J[Tesseract OCR with Nepali Language Pack]
@@ -39,6 +39,7 @@ flowchart TD
 ```
 
 ### The 4 Extraction Tiers
+
 1. **Tier 1 (pdfplumber)**: Direct vector table parsing from digitally generated PDFs.
 2. **Tier 2 (Vector Edge Reconstruction)**: Intersects explicit horizontal and vertical vector rules with text characters to rebuild stripped tables.
 3. **Tier 3 (Word Coordinate Clustering)**: Calculates whitespace gaps and word bounding boxes to reconstruct semi-structured, borderless tables.
@@ -71,12 +72,14 @@ docker run --rm -v "${PWD}:/app/data" pdf-to-excel /app/data/sample.pdf -o /app/
 #### 1. System Dependencies (Tesseract & Poppler)
 
 - **Ubuntu / Debian**:
+
   ```bash
   sudo apt-get update
   sudo apt-get install -y tesseract-ocr tesseract-ocr-nep poppler-utils
   ```
 
 - **macOS (via Homebrew)**:
+
   ```bash
   brew install tesseract tesseract-lang poppler
   ```
@@ -111,12 +114,14 @@ pip install -r requirements.txt
 The application supports configuration via a `.env` file, environment variables, or CLI arguments.
 
 1. **Copy the example environment file**:
+
    ```bash
    cp .env.example .env
    ```
 
 2. **Adjust paths in `.env` (optional)**:
    If Tesseract or Poppler are not in your default system `PATH`, configure them:
+
    ```env
    # Path to Tesseract binary (if not on PATH)
    TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
@@ -139,50 +144,55 @@ The application supports configuration via a `.env` file, environment variables,
 ## 🚀 Usage & CLI Reference
 
 ### Basic Command
+
 ```bash
 python pdf_to_excel.py "input.pdf"
 ```
 
 ### Full Options & Arguments
 
-| CLI Argument | Environment Variable | Default Value | Description |
-| :--- | :--- | :--- | :--- |
-| `pdf_path` | — | *(Required)* | Path to the input PDF file. |
-| `--mode` | `EXTRACTION_MODE` | `prompt` | Strategy: `prompt` (interactive), `auto` (plumber → OCR), `pdfplumber`, `ocr`. |
-| `-o`, `--output` | `DEFAULT_OUTPUT` | `extracted_table.xlsx` | Path to the output Excel workbook. |
-| `--pages` | — | `None` (all) | Page range, e.g. `"1,3-5"` (1-based index). |
-| `--column-breaks` | — | `None` (inferred) | Explicit x-coordinate column breaks (e.g. `--column-breaks 120 260 430`). |
-| `--ocr-lang` | `OCR_LANG` | `nep` | Tesseract language code (`nep`, `eng`, `nep+eng`). |
-| `--ocr-psm` | `OCR_PSM` | `6` | Tesseract Page Segmentation Mode (6 = single uniform block). |
-| `--ocr-confidence`| `OCR_CONFIDENCE`| `70` | Minimum confidence score (0–100) to keep OCR recognized words. |
-| `--dpi` | `OCR_DPI` | `300` | PDF rendering DPI before OCR (use 400 for low-res scans). |
-| `--force-ocr` | — | `False` | Skip direct extraction and go straight to OCR. |
-| `--max-columns` | `MAX_COLUMNS` | `12` | Maximum detected columns before a table is discarded as noise. |
-| `--poppler-path` | `POPPLER_PATH` | *(Auto-detected)* | Path to directory containing Poppler binaries (`pdftoppm`). |
-| `--tesseract-cmd`| `TESSERACT_CMD`| *(Auto-detected)* | Path to Tesseract executable. |
-| `--tessdata-dir` | `TESSDATA_PREFIX` | *(Auto-detected)* | Directory containing Tesseract `.traineddata` files. |
-| `--verbose` | `LOG_LEVEL=DEBUG` | `False` | Enable debug logging output. |
+| CLI Argument       | Environment Variable | Default Value          | Description                                                                    |
+| :----------------- | :------------------- | :--------------------- | :----------------------------------------------------------------------------- |
+| `pdf_path`         | —                    | _(Required)_           | Path to the input PDF file.                                                    |
+| `--mode`           | `EXTRACTION_MODE`    | `prompt`               | Strategy: `prompt` (interactive), `auto` (plumber → OCR), `pdfplumber`, `ocr`. |
+| `-o`, `--output`   | `DEFAULT_OUTPUT`     | `extracted_table.xlsx` | Path to the output Excel workbook.                                             |
+| `--pages`          | —                    | `None` (all)           | Page range, e.g. `"1,3-5"` (1-based index).                                    |
+| `--column-breaks`  | —                    | `None` (inferred)      | Explicit x-coordinate column breaks (e.g. `--column-breaks 120 260 430`).      |
+| `--ocr-lang`       | `OCR_LANG`           | `nep`                  | Tesseract language code (`nep`, `eng`, `nep+eng`).                             |
+| `--ocr-psm`        | `OCR_PSM`            | `6`                    | Tesseract Page Segmentation Mode (6 = single uniform block).                   |
+| `--ocr-confidence` | `OCR_CONFIDENCE`     | `70`                   | Minimum confidence score (0–100) to keep OCR recognized words.                 |
+| `--dpi`            | `OCR_DPI`            | `300`                  | PDF rendering DPI before OCR (use 400 for low-res scans).                      |
+| `--force-ocr`      | —                    | `False`                | Skip direct extraction and go straight to OCR.                                 |
+| `--max-columns`    | `MAX_COLUMNS`        | `12`                   | Maximum detected columns before a table is discarded as noise.                 |
+| `--poppler-path`   | `POPPLER_PATH`       | _(Auto-detected)_      | Path to directory containing Poppler binaries (`pdftoppm`).                    |
+| `--tesseract-cmd`  | `TESSERACT_CMD`      | _(Auto-detected)_      | Path to Tesseract executable.                                                  |
+| `--tessdata-dir`   | `TESSDATA_PREFIX`    | _(Auto-detected)_      | Directory containing Tesseract `.traineddata` files.                           |
+| `--verbose`        | `LOG_LEVEL=DEBUG`    | `False`                | Enable debug logging output.                                                   |
 
 ---
 
 ### Real-World Examples
 
 #### 1. Automatic Hybrid Mode (Direct Text with OCR Fallback)
+
 ```bash
 python pdf_to_excel.py "documents/annual_report.pdf" --mode auto -o "output/annual_report.xlsx"
 ```
 
 #### 2. Scanned Document: Force Nepali OCR with High DPI
+
 ```bash
 python pdf_to_excel.py "scanned_doc.pdf" --mode ocr --dpi 400 --ocr-confidence 65 -o "output/scanned_tables.xlsx"
 ```
 
 #### 3. Specific Pages with Custom Column Separators
+
 ```bash
 python pdf_to_excel.py "budget.pdf" --pages "2-4,7" --column-breaks 140 280 460 -o "output/budget.xlsx"
 ```
 
 #### 4. Headless Execution with Environment Configuration
+
 ```bash
 # Set environment variables for non-interactive workflows
 export EXTRACTION_MODE=auto
@@ -195,21 +205,25 @@ python pdf_to_excel.py "input.pdf" -o "output.xlsx"
 ## 🔧 Troubleshooting & FAQ
 
 ### Q: `Tesseract binary not found`
+
 - **Fix**: Ensure Tesseract is installed. If it is in a custom path, add it to your system `PATH` or set `TESSERACT_CMD` in `.env`:
   ```env
   TESSERACT_CMD=/usr/bin/tesseract
   ```
 
 ### Q: `Error opening data file .../nep.traineddata`
+
 - **Fix**: The Nepali language pack is missing.
   - Linux: `sudo apt-get install tesseract-ocr-nep`
   - macOS: `brew install tesseract-lang`
   - Windows: Download `nep.traineddata` from the [Tesseract GitHub Tessdata repository](https://github.com/tesseract-ocr/tessdata) and place it in your `tessdata` folder. Set `TESSDATA_PREFIX` to that folder.
 
 ### Q: `PDFInfoNotInstalledError: Unable to get page count. Is poppler installed and in PATH?`
+
 - **Fix**: `pdf2image` requires Poppler. Ensure `pdftoppm` is on your PATH or set `POPPLER_PATH` in `.env`.
 
 ### Q: Table columns are misaligned or merged in OCR mode
+
 - **Fix**:
   1. Increase rendering resolution: `--dpi 400`
   2. Provide explicit column separators: `--column-breaks 100 250 500`
@@ -219,4 +233,4 @@ python pdf_to_excel.py "input.pdf" -o "output.xlsx"
 
 ## 📄 License
 
-This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details..
